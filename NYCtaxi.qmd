@@ -1,0 +1,77 @@
+---
+title: "FILL YAML PLS"
+---
+
+```{r}
+#| include: false
+#| label: setup
+
+# ----Add your libs to p_load----
+pacman::p_load( 
+  arrow, 
+  tidyverse, 
+  fs, 
+  duckdb,
+  lubridate,
+  gt,
+  stringr
+)
+
+# ----Donwload NYC Taxi dataset to your device----
+# Done for the first time and only ONCE!
+output_dir <- "data/nyc-taxi"
+
+#base_url <- "https://d37ci6vzurychx.cloudfront.net/trip-data/"
+#months <- str_pad(1:12, width = 2, pad = "0")
+#for (month in months) {
+#  file_name <- paste0("yellow_tripdata_2024-", month, ".parquet")
+#  url_to_download <- paste0(base_url, file_name)
+#  partition_path <- file.path(output_dir, "year=2024", paste0("month=", month))
+#  dir_create(partition_path)
+#  local_file_path <- file.path(partition_path, "data.parquet")
+#  cat("Downloading:", file_name, "to", local_file_path, "\n")
+#  download.file(url_to_download, local_file_path, mode = "wb")
+#  cat("Done.\n")
+#}
+
+# ----Connect to DuckDB and create a view----
+# Done everytime you relaunch your R session, but only ONCE in one R session!
+con <- dbConnect(duckdb(), dbdir = "nyc.duckdb")
+
+dbExecute(
+  con,
+  sprintf("
+  CREATE OR REPLACE VIEW trips AS 
+  SELECT * FROM read_parquet('%s/**/*.parquet', hive_partitioning=1)", output_dir)
+)
+
+## ----Setup Taxi Zone Lookup Table----
+zones <- read_csv("data/taxi_zone_lookup.csv") |> as_tibble() |>
+  janitor::clean_names()
+
+# ----Create a tibble from the view----
+nyc_taxi_tbl <- tbl(con, "trips") 
+```
+
+```{r}
+#| label: clean data
+#| include: false
+
+# ----Joining the zones to get borough and zone names----
+# Those chunks of code are also done only ONCE in one R session!
+
+pu_zones <- zones |>
+  select(location_id, pu_borough = borough, pu_zone = zone)
+
+do_zones <- zones |>
+  select(location_id, do_borough = borough, do_zone = zone)
+
+nyc_taxi_tbl <- nyc_taxi_tbl |>
+  left_join(pu_zones, by = c("PULocationID" = "location_id"), copy = TRUE) |>
+  left_join(do_zones, by = c("DOLocationID" = "location_id"), copy = TRUE) |>
+  select(-c(vendor_id, store_and_fwd_flag))
+  janitor::clean_names()
+
+head(nyc_taxi_tbl)
+```
+

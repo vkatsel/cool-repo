@@ -24,14 +24,14 @@ output_dir <- "data/nyc-taxi"
 #base_url <- "https://d37ci6vzurychx.cloudfront.net/trip-data/"
 #months <- str_pad(1:12, width = 2, pad = "0")
 #for (month in months) {
-#  file_name <- paste0("yellow_tripdata_2024-", month, ".parquet")
-#  url_to_download <- paste0(base_url, file_name)
-#  partition_path <- file.path(output_dir, "year=2024", paste0("month=", month))
-#  dir_create(partition_path)
-#  local_file_path <- file.path(partition_path, "data.parquet")
-#  cat("Downloading:", file_name, "to", local_file_path, "\n")
-#  download.file(url_to_download, local_file_path, mode = "wb")
-#  cat("Done.\n")
+  #file_name <- paste0("yellow_tripdata_2024-", month, ".parquet")
+  #url_to_download <- paste0(base_url, file_name)
+  #partition_path <- file.path(output_dir, "year=2024", paste0("month=", month))
+  #dir_create(partition_path)
+  #local_file_path <- file.path(partition_path, "data.parquet")
+  #cat("Downloading:", file_name, "to", local_file_path, "\n")
+  #download.file(url_to_download, local_file_path, mode = "wb")
+  #cat("Done.\n")
 #}
 
 # ----Connect to DuckDB and create a view----
@@ -69,9 +69,164 @@ do_zones <- zones |>
 nyc_taxi_tbl <- nyc_taxi_tbl |>
   left_join(pu_zones, by = c("PULocationID" = "location_id"), copy = TRUE) |>
   left_join(do_zones, by = c("DOLocationID" = "location_id"), copy = TRUE) |>
-  select(-c(vendor_id, store_and_fwd_flag))
+  #select(-c(vendor_id, store_and_fwd_flag))
   janitor::clean_names()
 
 head(nyc_taxi_tbl)
 ```
 
+```{r}
+glimpse(nyc_taxi_tbl)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(sf)
+library(plotly)
+
+metro_tbl <- read_csv("data/mta_daily_rider_data.csv") |>
+  janitor::clean_names()
+
+metro_tbl <- metro_tbl |>
+  mutate(date = mdy(date)) |>
+  filter(year(date) == 2024)
+
+```
+
+```{r}
+#| label: day of week barcharts
+#| warning: false
+
+taxi_day_week <- nyc_taxi_tbl |>
+  mutate(day_of_week = wday(tpep_pickup_datetime, label = TRUE)) |>
+  group_by(day_of_week) |>
+  summarise(total_count = n()) |>
+  collect() |>
+  mutate(transport_type = "Taxi")
+
+subway_day_week <- metro_tbl |>
+  mutate(day_of_week = wday(date, label = TRUE)) |>
+  group_by(day_of_week) |>
+  summarise(total_count = sum(subways_total_estimated_ridership)) |>
+  mutate(transport_type = "Subway")
+  
+busses_day_week <- metro_tbl |>
+  mutate(day_of_week = wday(date, label = TRUE)) |>
+  group_by(day_of_week) |>
+  summarise(total_count = sum(buses_total_estimated_ridership)) |>
+  mutate(transport_type = "Bus")
+
+
+combined_data <- bind_rows(taxi_day_week, subway_day_week, busses_day_week)
+
+day_order <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+combined_data <- combined_data |>
+  mutate(day_of_week = factor(day_of_week, levels = day_order))
+
+ggplot(combined_data, aes(x = day_of_week, y = total_count, fill = transport_type)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ transport_type, scales = "free_y") +
+  scale_fill_manual(values = c("Taxi" = "#FFBD31", "Subway" = "#FF5000", 
+                               "Bus" = "#77587B")) +
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M")) +
+  labs(
+    title = "NYC Transportation Trips by Day of the Week in 2024",
+    x = "Day of week",
+    y = "Number of trips (in millions)"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#| label: lollipop chart airport
+#| warning: false
+
+airport_location_ids <- zones |>
+  filter(str_detect(zone, "Airport")) |>
+  pull(location_id)
+
+airport_percentage_by_day <- nyc_taxi_tbl |>
+  mutate(
+    day_of_week = wday(tpep_pickup_datetime, label = TRUE),
+    is_airport_trip = do_location_id %in% airport_location_ids | 
+      pu_location_id %in% airport_location_ids
+  ) |>
+  group_by(day_of_week) |>
+  summarise(
+    total_trips = n(),
+    total_airport_trips = sum(is_airport_trip, na.rm = TRUE)
+  ) |>
+  mutate(
+    airport_trip_percentage = total_airport_trips / total_trips * 100
+  ) |>
+  collect()
+
+ggplot(airport_percentage_by_day, aes(x = reorder(day_of_week, airport_trip_percentage),
+                                 y = airport_trip_percentage)) +
+  geom_segment(aes(xend = reorder(day_of_week, airport_trip_percentage), yend = 0), 
+               color = "#415C89") +
+  geom_point(aes(), size = 5, color = "#415C89") +
+  coord_flip() +
+  labs(
+    title = "The most popular day for airport trips in NYC (2024)",
+    x = NULL,
+    y = "Percentage of taxi trips to/from airports (%)"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+#| label: combined interactive map
+#| warning: false
+
+taxi_zones_sf <- st_read("data/taxi_zones/taxi_zones.shp") |>
+  janitor::clean_names()
+
+dropoff_counts <- nyc_taxi_tbl |>
+  group_by(do_location_id) |>
+  summarise(trip_count = n(), .groups = "drop") |>
+  collect()
+
+taxi_zones_with_data <- taxi_zones_sf |>
+  left_join(dropoff_counts, by = c("location_id" = "do_location_id"))
+
+subway_lines <- st_read("data/nyc_subway_map/routes_nyc_subway_may2016.shp") |>
+  janitor::clean_names()
+
+p_combined <- ggplot() +
+  geom_sf(
+    data = taxi_zones_with_data,
+    aes(
+      fill = trip_count,
+      text = paste("Zone:", zone, "\nNumber of drop-offs:", scales::comma(trip_count))
+    ),
+    color = "white",
+    linewidth = 0.05
+  ) +
+  geom_sf(
+    data = subway_lines,
+    aes(),
+    color = "#99993D",
+    linewidth = 0.3,
+    inherit.aes = FALSE
+  ) +
+  scale_fill_gradient(
+    high = "#29001D",
+    low = "#F9F9F1",
+    trans = "log10",
+    labels = scales::label_comma(),
+    name = "Number of Drop-offs",
+    na.value = "lightgrey"
+  ) +
+  labs(
+    title = "NYC Taxi Drop-off Density Map with Subway Lines",
+  ) +
+  theme_minimal()
+
+ggplotly(p_combined, tooltip = "text")
+```
+
+The posh, residential Upper East Side is known for its wealthy denizens, fancy restaurants and designer shops along Madison Avenue. It's a pretty neighborhood, with a mix of classic brownstones and upscale high-rises. Museum Mile, a stretch of 5th Avenue next to Central Park, draws crowds to cultural institutions that include the Metropolitan Museum of Art, the Solomon R. Guggenheim Museum and El Museo del Barrio.

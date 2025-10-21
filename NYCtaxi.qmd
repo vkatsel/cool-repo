@@ -1,6 +1,35 @@
 ---
-title: "FILL YAML PLS"
+title: "Final Project"
+author: "Taxi 838"
+format: 
+  html: default
+  pdf: default
+  
+execute:
+  echo: true
+  warning: false   
+  message: false
+  error: false
+  include: false
+
+editor: visual
 ---
+
+## Introduction
+
+If you live in a big city and want to get somewhere without your car, the first thing you think is: "can I get there using the subway?"
+
+In a big city the subway is usually the most reliable and efficient way of traveling. Trains come around every 5 minutes, never get stuck in traffic and get you to the destination as fast as possible without giving you a ridiculous paycheck.
+
+But what if subway isn't an option? What if the destination is too far from the nearest subway station, or, perhaps, there's some maintenance duty going on? While underground means of transportation might be the best kind of public transport, there still are reliable ways of getting to your destination above the ground.
+
+Maybe there could be cases or certain circumstances that make underground transportation the second best option, or, even third? Our team decided to dig deeper into this topic. Let's see what we uncovered!
+
+## Data Import and Cleaning
+
+We decided to use the NYC Taxi data and MTA Daily Rider Data to compare two means of transportation: taxi and subway.
+
+First of all, let's download the data related to taxis and clean the names of columns.
 
 ```{r}
 #| include: false
@@ -21,18 +50,18 @@ pacman::p_load(
 # Done for the first time and only ONCE!
 output_dir <- "data/nyc-taxi"
 
-#base_url <- "https://d37ci6vzurychx.cloudfront.net/trip-data/"
-#months <- str_pad(1:12, width = 2, pad = "0")
-#for (month in months) {
-  #file_name <- paste0("yellow_tripdata_2024-", month, ".parquet")
-  #url_to_download <- paste0(base_url, file_name)
-  #partition_path <- file.path(output_dir, "year=2024", paste0("month=", month))
-  #dir_create(partition_path)
-  #local_file_path <- file.path(partition_path, "data.parquet")
-  #cat("Downloading:", file_name, "to", local_file_path, "\n")
-  #download.file(url_to_download, local_file_path, mode = "wb")
-  #cat("Done.\n")
-#}
+# base_url <- "https://d37ci6vzurychx.cloudfront.net/trip-data/"
+# months <- str_pad(1:12, width = 2, pad = "0")
+# for (month in months) {
+#   file_name <- paste0("yellow_tripdata_2024-", month, ".parquet")
+#   url_to_download <- paste0(base_url, file_name)
+#   partition_path <- file.path(output_dir, "year=2024", paste0("month=", month))
+#   dir_create(partition_path)
+#   local_file_path <- file.path(partition_path, "data.parquet")
+#   cat("Downloading:", file_name, "to", local_file_path, "\n")
+#   download.file(url_to_download, local_file_path, mode = "wb")
+#   cat("Done.\n")
+# }
 
 # ----Connect to DuckDB and create a view----
 # Done everytime you relaunch your R session, but only ONCE in one R session!
@@ -41,7 +70,7 @@ con <- dbConnect(duckdb(), dbdir = "nyc.duckdb")
 dbExecute(
   con,
   sprintf("
-  CREATE OR REPLACE VIEW trips AS 
+  CREATE OR REPLACE VIEW trips AS
   SELECT * FROM read_parquet('%s/**/*.parquet', hive_partitioning=1)", output_dir)
 )
 
@@ -52,6 +81,8 @@ zones <- read_csv("data/taxi_zone_lookup.csv") |> as_tibble() |>
 # ----Create a tibble from the view----
 nyc_taxi_tbl <- tbl(con, "trips") 
 ```
+
+Now let's join the spatial data with the numbers and clean column names.
 
 ```{r}
 #| label: clean data
@@ -69,15 +100,20 @@ do_zones <- zones |>
 nyc_taxi_tbl <- nyc_taxi_tbl |>
   left_join(pu_zones, by = c("PULocationID" = "location_id"), copy = TRUE) |>
   left_join(do_zones, by = c("DOLocationID" = "location_id"), copy = TRUE) |>
-  #select(-c(vendor_id, store_and_fwd_flag))
+  # select(-c(vendor_id, store_and_fwd_flag))
   janitor::clean_names()
 
 head(nyc_taxi_tbl)
 ```
 
 ```{r}
+#| include: true
 glimpse(nyc_taxi_tbl)
 ```
+
+Nice and clean!
+
+Let's move on to the MTA dataset. There's not much work to do here, really:
 
 ```{r}
 library(tidyverse)
@@ -94,7 +130,14 @@ metro_tbl <- metro_tbl |>
 
 ```
 
+And that's it for data collection and cleaning. Now let's try and unveil the intrigue.
+
+## Analysis
+
+First of all, let's see what the most popular means of public transportation are for New-Yorkers:
+
 ```{r}
+#| include: true
 #| label: day of week barcharts
 #| warning: false
 
@@ -139,7 +182,14 @@ ggplot(combined_data, aes(x = day_of_week, y = total_count, fill = transport_typ
   theme_minimal()
 ```
 
+It is clear now that subway is the best way of getting around the city for the most of the citizens. And it's really logical if you think about it. What's the problem with the taxi? It might be too expensive and get stuck in traffic. The bus fixes the expensiveness of taxi, but still has the problem of getting stuck in traffic. On the other hand, subway doesn't have any of those issues. It's cheap, fast, reliable and, let's be honest, has a vibe to it.
+
+Also, the bar chart suggests that on Saturday and Sunday there is a dip in bus and subway usage, but we can't say the same about taxi.
+
+Honestly, I didn't think that taxi is so rarely used. What's the reason behind its low usage rate? Maybe it's too expensive or too unnecessary? Perhaps the use cases for taxi are narrow? What if taxi is only used to go to, for example, the airport? Let's see:
+
 ```{r}
+#| include: true
 #| label: lollipop chart airport
 #| warning: false
 
@@ -177,10 +227,14 @@ ggplot(airport_percentage_by_day, aes(x = reorder(day_of_week, airport_trip_perc
   theme_minimal()
 ```
 
+Nope. It seems that taxi is just a luxurious way of getting around (or just that its use case isn't really getting to the airport).
+
+We didn't come up with another definitive way of using the taxi that also could be analyzed with the data we have. So our plotter, Yevhenia, decided to create a choropleth map of taxi drop offs.
+
+For the sake of accuracy, it would be convenient to also add the subway routes. That way we can clearly see if taxis cover the areas that lack proper subway lines. Let's see what the map has to say:
 
 ```{r}
-#| label: combined interactive map
-#| warning: false
+#| include: false
 
 taxi_zones_sf <- st_read("data/taxi_zones/taxi_zones.shp") |>
   janitor::clean_names()
@@ -195,6 +249,12 @@ taxi_zones_with_data <- taxi_zones_sf |>
 
 subway_lines <- st_read("data/nyc_subway_map/routes_nyc_subway_may2016.shp") |>
   janitor::clean_names()
+```
+
+```{r}
+#| label: combined interactive map
+#| warning: false
+#| include: true
 
 p_combined <- ggplot() +
   geom_sf(
@@ -223,10 +283,17 @@ p_combined <- ggplot() +
   ) +
   labs(
     title = "NYC Taxi Drop-off Density Map with Subway Lines",
+    subtitle = "Log scaling applied to the number of drop-offs"
   ) +
   theme_minimal()
 
-ggplotly(p_combined, tooltip = "text")
+p_combined
 ```
 
-The posh, residential Upper East Side is known for its wealthy denizens, fancy restaurants and designer shops along Madison Avenue. It's a pretty neighborhood, with a mix of classic brownstones and upscale high-rises. Museum Mile, a stretch of 5th Avenue next to Central Park, draws crowds to cultural institutions that include the Metropolitan Museum of Art, the Solomon R. Guggenheim Museum and El Museo del Barrio.
+As we can see, taxi is really not that popular even in the small areas where the subway is underdeveloped. The biggest number of drop-offs is concentrated around airports of New-York, so getting a cab to the airport is indeed the biggest use case of the taxi services. Also, for some reason, Manhattan happens to be another concentration of taxi drop-offs. I asked ChatGPT about why that is the case and here's what he told me:
+
+"Manhattan stands out as a major drop-off area for taxis largely because it is the economic, cultural, and tourist heart of New York City. Dense clusters of offices, hotels, theaters, and attractions concentrate a high volume of trips into relatively small areas. Even though outer boroughs may have more residents, their trips are spread over larger, less dense neighborhoods, whereas Manhattan blocks can see thousands of drop-offs daily—numbers comparable to major airports. The combination of heavy commuter traffic, tourism, nightlife, and the convenience of taxis for short, cross-town, or luggage-heavy trips makes Manhattan a consistent hotspot for taxi activity."
+
+## Conclusion
+
+Even if taxi isn't the best way of transportation, it still has its own use cases where it shines. It was surprising to find that taxis aren't only widely used for trips to airports, but also for trips to certain areas (Manhattan specifically). I thought that using a taxi comes down to areas where other means of transportation are underdeveloped, which can't be said about Manhattan, the central district of New-York. Good thing we ran a research and now know how it works inside this gigantic city.

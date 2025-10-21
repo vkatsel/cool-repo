@@ -67,6 +67,7 @@ output_dir <- "data/nyc-taxi"
 # Done everytime you relaunch your R session, but only ONCE in one R session!
 con <- dbConnect(duckdb(), dbdir = "nyc.duckdb")
 
+
 dbExecute(
   con,
   sprintf("
@@ -149,19 +150,20 @@ taxi_day_week <- nyc_taxi_tbl |>
   mutate(transport_type = "Taxi")
 
 subway_day_week <- metro_tbl |>
-  mutate(day_of_week = wday(date, label = TRUE)) |>
+  mutate(day_of_week = wday(date, label = TRUE, locale = "C")) |>
   group_by(day_of_week) |>
   summarise(total_count = sum(subways_total_estimated_ridership)) |>
   mutate(transport_type = "Subway")
   
 busses_day_week <- metro_tbl |>
-  mutate(day_of_week = wday(date, label = TRUE)) |>
+  mutate(day_of_week = wday(date, label = TRUE, locale = "C")) |>
   group_by(day_of_week) |>
   summarise(total_count = sum(buses_total_estimated_ridership)) |>
   mutate(transport_type = "Bus")
 
 
 combined_data <- bind_rows(taxi_day_week, subway_day_week, busses_day_week)
+
 
 day_order <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -287,7 +289,7 @@ p_combined <- ggplot() +
   ) +
   theme_minimal()
 
-p_combined
+ggplotly(p_combined, tooltip = "text")
 ```
 
 As we can see, taxi is really not that popular even in the small areas where the subway is underdeveloped. The biggest number of drop-offs is concentrated around airports of New-York, so getting a cab to the airport is indeed the biggest use case of the taxi services. Also, for some reason, Manhattan happens to be another concentration of taxi drop-offs. I asked ChatGPT about why that is the case and here's what he told me:
